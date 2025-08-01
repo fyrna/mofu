@@ -8,7 +8,7 @@ import (
 
 var ctxPool = sync.Pool{
 	New: func() any {
-		return new(C)
+		return &C{params: make(map[string]string)}
 	},
 }
 
@@ -22,15 +22,28 @@ type C struct {
 func alloc(w http.ResponseWriter, r *http.Request) *C {
 	c := ctxPool.Get().(*C)
 	c.Writer, c.Req = w, r
+
+	for k := range c.params {
+		delete(c.params, k)
+	}
+
 	return c
 }
 
 func free(c *C) {
-	c.params = nil
+	for k := range c.params {
+		delete(c.params, k)
+	}
+
+	c.Writer = nil
+	c.Req = nil
 	ctxPool.Put(c)
 }
 
 func (c *C) Param(name string) string {
+	if c.params == nil {
+		return ""
+	}
 	return c.params[name]
 }
 
@@ -39,12 +52,14 @@ func (c *C) Query(key string) string {
 }
 
 func (c *C) BindJSON(v any) error {
+	defer c.Req.Body.Close()
 	return json.NewDecoder(c.Req.Body).Decode(v)
 }
 
 func (c *C) SendText(code int, s string) error {
 	c.Writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	c.Writer.WriteHeader(code)
+
 	_, err := c.Writer.Write([]byte(s))
 	return err
 }
@@ -52,12 +67,14 @@ func (c *C) SendText(code int, s string) error {
 func (c *C) SendJSON(code int, v any) error {
 	c.Writer.Header().Set("Content-Type", "application/json")
 	c.Writer.WriteHeader(code)
+
 	return json.NewEncoder(c.Writer).Encode(v)
 }
 
 func (c *C) SendHTML(code int, s string) error {
 	c.Writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 	c.Writer.WriteHeader(code)
+
 	_, err := c.Writer.Write([]byte(s))
 	return err
 }

@@ -1,10 +1,7 @@
 // mofu, a http micro-framework
 package mofu
 
-import (
-	"net/http"
-	"strings"
-)
+import "net/http"
 
 // Miaw returns a new Router instance.
 func Miaw() *Router {
@@ -33,7 +30,7 @@ type HandlerFunc func(*C) error
 
 // handler wraps HandlerFunc into http.Handler.
 func (r *Router) handler(req *http.Request) http.Handler {
-	n, ps := r.tree.search(req.Method + strings.TrimPrefix(req.URL.Path, "/"))
+	n, ps := r.tree.search(req.Method + req.URL.Path)
 
 	if n == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -55,6 +52,6 @@ func (r *Router) handler(req *http.Request) http.Handler {
 
 		defer free(c)
 
-		_ = n.h(c)
+		_ = n.handler(c)
 	})
 }
