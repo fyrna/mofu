@@ -18,18 +18,22 @@ func (n *node) insert(path string, h HandlerFunc) {
 	for {
 		idx := strings.IndexByte(path, '/')
 		seg := path
+
 		if idx > 0 {
 			seg = path[:idx]
 		}
 
 		child := cur.childBySeg(seg)
+
 		if child == nil {
 			child = &node{seg: seg}
+
 			if strings.HasPrefix(seg, ":") {
 				child.wild = true
 			} else if seg == "*" {
 				child.catch = true
 			}
+
 			cur.child = append(cur.child, child)
 		}
 
@@ -44,6 +48,7 @@ func (n *node) insert(path string, h HandlerFunc) {
 			child.h = h
 			return
 		}
+
 		cur = child
 	}
 }
@@ -55,7 +60,7 @@ func (n *node) search(path string) (*node, map[string]string) {
 	)
 
 	for cur != nil && path != "" {
-		// consume leading slash
+		// consume optional leading slash
 		if path[0] == '/' {
 			path = path[1:]
 			if path == "" {
@@ -69,19 +74,20 @@ func (n *node) search(path string) (*node, map[string]string) {
 
 		idx := strings.IndexByte(path, '/')
 		seg := path
+
 		if idx > 0 {
 			seg = path[:idx]
 		}
 
 		var next *node
-		// exact segment first
+
 		for _, c := range cur.child {
 			if !c.wild && !c.catch && c.seg == seg {
 				next = c
 				break
 			}
 		}
-		// wildcard
+
 		if next == nil {
 			for _, c := range cur.child {
 				if c.wild {
@@ -91,7 +97,6 @@ func (n *node) search(path string) (*node, map[string]string) {
 				}
 			}
 
-			// catch-all
 			for _, c := range cur.child {
 				if c.catch {
 					params["*"] = strings.TrimPrefix(path, "/")
@@ -101,7 +106,9 @@ func (n *node) search(path string) (*node, map[string]string) {
 
 			return nil, nil
 		}
+
 		cur = next
+
 		if idx >= 0 {
 			path = path[idx:]
 		} else {
@@ -112,6 +119,7 @@ func (n *node) search(path string) (*node, map[string]string) {
 	if cur != nil && cur.h != nil {
 		return cur, params
 	}
+
 	return nil, nil
 }
 
@@ -121,11 +129,12 @@ func (n *node) childBySeg(seg string) *node {
 			return c
 		}
 	}
+
 	return nil
 }
 
 func (r *Router) add(method, path string, h HandlerFunc) {
-	r.tree.insert(method+path, h)
+	r.tree.insert(method+strings.TrimPrefix(path, "/"), h)
 }
 
 func (r *Router) GET(path string, h HandlerFunc) {
