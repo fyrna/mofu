@@ -18,32 +18,33 @@ func (n *node) insert(path string, h HandlerFunc) {
 	for {
 		idx := strings.IndexByte(path, '/')
 		seg := path
-
 		if idx > 0 {
 			seg = path[:idx]
 		}
 
 		child := cur.childBySeg(seg)
-
 		if child == nil {
 			child = &node{seg: seg}
-
 			if strings.HasPrefix(seg, ":") {
 				child.wild = true
 			} else if seg == "*" {
 				child.catch = true
 			}
-
 			cur.child = append(cur.child, child)
 		}
 
-		if idx < 0 {
+		if idx < 0 { // no more slashes – last segment
 			child.h = h
 			return
 		}
 
+		// advance past this segment and the slash
+		path = path[idx+1:]
+		if path == "" { // ended in a trailing slash
+			child.h = h
+			return
+		}
 		cur = child
-		path = path[idx:]
 	}
 }
 
@@ -54,34 +55,53 @@ func (n *node) search(path string) (*node, map[string]string) {
 	)
 
 	for cur != nil && path != "" {
+		// consume leading slash
+		if path[0] == '/' {
+			path = path[1:]
+			if path == "" {
+				if cur.h != nil {
+					return cur, params
+				}
+				return nil, nil
+			}
+			continue
+		}
+
 		idx := strings.IndexByte(path, '/')
 		seg := path
-
 		if idx > 0 {
 			seg = path[:idx]
 		}
 
 		var next *node
-
+		// exact segment first
 		for _, c := range cur.child {
-			switch {
-			case c.wild:
-				params[c.seg[1:]] = seg
+			if !c.wild && !c.catch && c.seg == seg {
 				next = c
-			case c.catch:
-				params["*"] = strings.TrimPrefix(path, "/")
-				return c, params
-			case c.seg == seg:
-				next = c
+				break
 			}
 		}
-
+		// wildcard
 		if next == nil {
+			for _, c := range cur.child {
+				if c.wild {
+					params[c.seg[1:]] = seg
+					next = c
+					break
+				}
+			}
+
+			// catch-all
+			for _, c := range cur.child {
+				if c.catch {
+					params["*"] = strings.TrimPrefix(path, "/")
+					return c, params
+				}
+			}
+
 			return nil, nil
 		}
-
 		cur = next
-
 		if idx >= 0 {
 			path = path[idx:]
 		} else {
@@ -92,7 +112,6 @@ func (n *node) search(path string) (*node, map[string]string) {
 	if cur != nil && cur.h != nil {
 		return cur, params
 	}
-
 	return nil, nil
 }
 
