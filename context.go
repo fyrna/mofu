@@ -18,28 +18,6 @@ type C struct {
 	params map[string]string
 }
 
-// i love these names
-func alloc(w http.ResponseWriter, r *http.Request) *C {
-	c := ctxPool.Get().(*C)
-	c.Writer, c.Req = w, r
-
-	for k := range c.params {
-		delete(c.params, k)
-	}
-
-	return c
-}
-
-func free(c *C) {
-	for k := range c.params {
-		delete(c.params, k)
-	}
-
-	c.Writer = nil
-	c.Req = nil
-	ctxPool.Put(c)
-}
-
 func (c *C) Param(name string) string {
 	if c.params == nil {
 		return ""
@@ -83,4 +61,25 @@ func (c *C) SendBytes(code int, b []byte) error {
 	c.Writer.WriteHeader(code)
 	_, err := c.Writer.Write(b)
 	return err
+}
+
+// i love these names
+func alloc(w http.ResponseWriter, r *http.Request) *C {
+	c := ctxPool.Get().(*C)
+	c.Writer, c.Req = w, r
+
+	for k := range c.params {
+		delete(c.params, k)
+	}
+
+	return c
+}
+
+func free(c *C) {
+	for k := range c.params {
+		delete(c.params, k)
+	}
+
+	c.Writer, c.Req = nil, nil
+	ctxPool.Put(c)
 }
