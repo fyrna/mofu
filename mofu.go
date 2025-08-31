@@ -6,11 +6,6 @@ import (
 	"strings"
 )
 
-// Miaw returns a new Router instance.
-func Miaw() *Router {
-	return &Router{tree: new(node)}
-}
-
 // Router implements http.Handler.
 type Router struct {
 	tree       *node
@@ -31,6 +26,11 @@ type node struct {
 }
 
 type HandlerFunc func(*C) error
+
+// Miaw returns a new Router instance.
+func Miaw() *Router {
+	return &Router{tree: new(node)}
+}
 
 func (r *Router) GET(path string, h HandlerFunc) {
 	r.add("GET", path, h)
