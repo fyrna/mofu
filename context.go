@@ -2,6 +2,7 @@ package mofu
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"sync"
 )
@@ -16,8 +17,8 @@ var ctxPool = sync.Pool{
 }
 
 type C struct {
-	Writer http.ResponseWriter
-	Req    *http.Request
+	Writer  http.ResponseWriter
+	Request *http.Request
 
 	params map[string]string
 	values map[string]any
@@ -31,6 +32,18 @@ func (c *C) Get(key string) any {
 	return c.values[key]
 }
 
+func (c *C) Status(code int) {
+	c.Writer.WriteHeader(code)
+}
+
+func (c *C) SetHeader(k, v string) {
+	c.Writer.Header().Set(k, v)
+}
+
+func (c *C) GetHeader(k string) string {
+	return c.Request.Header.Get(k)
+}
+
 func (c *C) Param(name string) string {
 	if c.params == nil {
 		return ""
@@ -39,19 +52,23 @@ func (c *C) Param(name string) string {
 }
 
 func (c *C) Query(key string) string {
-	return c.Req.URL.Query().Get(key)
+	return c.Request.URL.Query().Get(key)
+}
+
+func (c *C) Form(name string) string {
+	return c.Request.FormValue(name)
 }
 
 func (c *C) BindJSON(v any) error {
-	defer c.Req.Body.Close()
-	return json.NewDecoder(c.Req.Body).Decode(v)
+	defer c.Request.Body.Close()
+	return json.NewDecoder(c.Request.Body).Decode(v)
 }
 
 func (c *C) String(code int, s string) error {
 	c.Writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	c.Writer.WriteHeader(code)
 
-	_, err := c.Writer.Write([]byte(s))
+	_, err := io.WriteString(c.Writer, s)
 	return err
 }
 
@@ -70,16 +87,18 @@ func (c *C) HTML(code int, s string) error {
 	return err
 }
 
-func (c *C) Bytes(code int, b []byte) error {
-	c.Writer.WriteHeader(code)
-	_, err := c.Writer.Write(b)
-	return err
+func (c *C) Redirect(url string, code ...int) {
+	status := http.StatusFound
+	if len(code) > 0 {
+		status = code[0]
+	}
+	http.Redirect(c.Writer, c.Request, url, status)
 }
 
 // i love these names
 func alloc(w http.ResponseWriter, r *http.Request) *C {
 	c := ctxPool.Get().(*C)
-	c.Writer, c.Req = w, r
+	c.Writer, c.Request = w, r
 
 	for k := range c.params {
 		delete(c.params, k)
@@ -99,6 +118,6 @@ func free(c *C) {
 		delete(c.values, k)
 	}
 
-	c.Writer, c.Req = nil, nil
+	c.Writer, c.Request = nil, nil
 	ctxPool.Put(c)
 }

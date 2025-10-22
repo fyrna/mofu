@@ -3,6 +3,7 @@ package mofu
 
 import (
 	"bytes"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -11,7 +12,7 @@ import (
 type Router struct {
 	tree       *node
 	notFound   HandlerFunc
-	middleware []func(http.Handler) http.Handler
+	middleware []Middleware
 }
 
 type node struct {
@@ -25,8 +26,6 @@ type node struct {
 	hasWildcard bool
 	hasCatchAll bool
 }
-
-type HandlerFunc func(*C) error
 
 // Miaw returns a new Router instance.
 func Miaw() *Router {
@@ -59,17 +58,26 @@ func (r *Router) OnNotFound(h HandlerFunc) {
 }
 
 // Use adds middleware simple and compatible with net/http :3
-func (r *Router) Use(mw func(http.Handler) http.Handler) {
-	r.middleware = append(r.middleware, mw)
+func (r *Router) Use(mws ...Middleware) {
+	r.middleware = append([]Middleware(nil), mws...)
+}
+
+func (r *Router) Start(addr string) error {
+	log.Printf("mofu listening on %s\n", addr)
+	return http.ListenAndServe(addr, r)
 }
 
 // ServeHTTP implements http.Handler.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	h := r.handler(req)
+
 	for i := len(r.middleware) - 1; i >= 0; i-- {
 		h = r.middleware[i](h)
 	}
-	h.ServeHTTP(w, req)
+
+	c := alloc(w, req)
+	defer free(c)
+	_ = h(c)
 }
 
 func (r *Router) add(method, path string, h HandlerFunc) {
@@ -85,127 +93,22 @@ func (r *Router) add(method, path string, h HandlerFunc) {
 }
 
 // handler wraps HandlerFunc into http.Handler.
-func (r *Router) handler(req *http.Request) http.Handler {
+func (r *Router) handler(req *http.Request) HandlerFunc {
 	n, ps := r.tree.search(req.Method + req.URL.Path)
 
 	if n == nil {
-		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			c := alloc(w, req)
-			defer free(c)
-
+		return func(c *C) error {
 			if r.notFound != nil {
-				_ = r.notFound(c)
-			} else {
-				c.String(http.StatusNotFound, "404 page not found")
+				return r.notFound(c)
 			}
-		})
+			return c.String(http.StatusNotFound, "404 page not found")
+		}
 	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		c := alloc(w, req)
-		c.params = ps
-
-		defer free(c)
-
-		_ = n.handler(c)
-	})
-}
-
-type Group struct {
-	router     *Router
-	prefix     string
-	middleware []func(http.Handler) http.Handler
-}
-
-func (r *Router) Group(prefix string) *Group {
-	if prefix == "" {
-		prefix = "/"
-	}
-
-	if prefix[0] != '/' {
-		prefix = "/" + prefix
-	}
-
-	if prefix != "/" && prefix[len(prefix)-1] == '/' {
-		prefix = prefix[:len(prefix)-1]
-	}
-
-	return &Group{
-		router: r,
-		prefix: prefix,
-	}
-}
-
-func (g *Group) Group(prefix string) *Group {
-	if prefix == "" {
-		prefix = "/"
-	}
-
-	if prefix[0] != '/' {
-		prefix = "/" + prefix
-	}
-
-	if prefix != "/" && prefix[len(prefix)-1] == '/' {
-		prefix = prefix[:len(prefix)-1]
-	}
-
-	fullPrefix := g.prefix + prefix
-	if fullPrefix == "" {
-		fullPrefix = "/"
-	}
-
-	return &Group{
-		router:     g.router,
-		prefix:     fullPrefix,
-		middleware: append([]func(http.Handler) http.Handler{}, g.middleware...),
-	}
-}
-
-func (g *Group) Use(mw func(http.Handler) http.Handler) {
-	g.middleware = append(g.middleware, mw)
-}
-
-func (g *Group) GET(path string, h HandlerFunc) {
-	g.router.GET(g.prefix+path, g.wrap(h))
-}
-
-func (g *Group) POST(path string, h HandlerFunc) {
-	g.router.POST(g.prefix+path, g.wrap(h))
-}
-
-func (g *Group) PUT(path string, h HandlerFunc) {
-	g.router.PUT(g.prefix+path, g.wrap(h))
-}
-
-func (g *Group) DELETE(path string, h HandlerFunc) {
-	g.router.DELETE(g.prefix+path, g.wrap(h))
-}
-
-func (g *Group) Handle(method, path string, h HandlerFunc) {
-	g.router.add(method, g.prefix+path, g.wrap(h))
-}
-
-func (g *Group) wrap(h HandlerFunc) HandlerFunc {
-	if len(g.middleware) == 0 {
-		return h
-	}
-
-	// Convert HandlerFunc to http.Handler
-	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		c := alloc(w, req)
-		defer free(c)
-		_ = h(c)
-	})
-
-	// Apply middleware in reverse order
-	for i := len(g.middleware) - 1; i >= 0; i-- {
-		handler = g.middleware[i](handler)
-	}
-
-	// Convert back to HandlerFunc
+	handlerFunc := n.handler
 	return func(c *C) error {
-		handler.ServeHTTP(c.Writer, c.Req)
-		return nil
+		c.params = ps
+		return handlerFunc(c)
 	}
 }
 
