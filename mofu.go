@@ -2,6 +2,7 @@
 package mofu
 
 import (
+	"bytes"
 	"net/http"
 	"strings"
 )
@@ -48,16 +49,8 @@ func (r *Router) DELETE(path string, h HandlerFunc) {
 	r.add("DELETE", path, h)
 }
 
-func (r *Router) PATCH(path string, h HandlerFunc) {
-	r.add("PATCH", path, h)
-}
-
-func (r *Router) HEAD(path string, h HandlerFunc) {
-	r.add("HEAD", path, h)
-}
-
-func (r *Router) OPTIONS(path string, h HandlerFunc) {
-	r.add("OPTIONS", path, h)
+func (r *Router) Handle(method, path string, h HandlerFunc) {
+	r.add(method, path, h)
 }
 
 // OnNotFound sets global 404 handler.
@@ -103,7 +96,7 @@ func (r *Router) handler(req *http.Request) http.Handler {
 			if r.notFound != nil {
 				_ = r.notFound(c)
 			} else {
-				c.SendText(http.StatusNotFound, "404 page not found")
+				c.String(http.StatusNotFound, "404 page not found")
 			}
 		})
 	}
@@ -118,10 +111,121 @@ func (r *Router) handler(req *http.Request) http.Handler {
 	})
 }
 
+type Group struct {
+	router     *Router
+	prefix     string
+	middleware []func(http.Handler) http.Handler
+}
+
+func (r *Router) Group(prefix string) *Group {
+	if prefix == "" {
+		prefix = "/"
+	}
+
+	if prefix[0] != '/' {
+		prefix = "/" + prefix
+	}
+
+	if prefix != "/" && prefix[len(prefix)-1] == '/' {
+		prefix = prefix[:len(prefix)-1]
+	}
+
+	return &Group{
+		router: r,
+		prefix: prefix,
+	}
+}
+
+func (g *Group) Group(prefix string) *Group {
+	if prefix == "" {
+		prefix = "/"
+	}
+
+	if prefix[0] != '/' {
+		prefix = "/" + prefix
+	}
+
+	if prefix != "/" && prefix[len(prefix)-1] == '/' {
+		prefix = prefix[:len(prefix)-1]
+	}
+
+	fullPrefix := g.prefix + prefix
+	if fullPrefix == "" {
+		fullPrefix = "/"
+	}
+
+	return &Group{
+		router:     g.router,
+		prefix:     fullPrefix,
+		middleware: append([]func(http.Handler) http.Handler{}, g.middleware...),
+	}
+}
+
+func (g *Group) Use(mw func(http.Handler) http.Handler) {
+	g.middleware = append(g.middleware, mw)
+}
+
+func (g *Group) GET(path string, h HandlerFunc) {
+	g.router.GET(g.prefix+path, g.wrap(h))
+}
+
+func (g *Group) POST(path string, h HandlerFunc) {
+	g.router.POST(g.prefix+path, g.wrap(h))
+}
+
+func (g *Group) PUT(path string, h HandlerFunc) {
+	g.router.PUT(g.prefix+path, g.wrap(h))
+}
+
+func (g *Group) DELETE(path string, h HandlerFunc) {
+	g.router.DELETE(g.prefix+path, g.wrap(h))
+}
+
+func (g *Group) Handle(method, path string, h HandlerFunc) {
+	g.router.add(method, g.prefix+path, g.wrap(h))
+}
+
+func (g *Group) wrap(h HandlerFunc) HandlerFunc {
+	if len(g.middleware) == 0 {
+		return h
+	}
+
+	// Convert HandlerFunc to http.Handler
+	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		c := alloc(w, req)
+		defer free(c)
+		_ = h(c)
+	})
+
+	// Apply middleware in reverse order
+	for i := len(g.middleware) - 1; i >= 0; i-- {
+		handler = g.middleware[i](handler)
+	}
+
+	// Convert back to HandlerFunc
+	return func(c *C) error {
+		handler.ServeHTTP(c.Writer, c.Req)
+		return nil
+	}
+}
+
 func (n *node) insert(path string, h HandlerFunc) {
 	current := n
+	paramNames := make(map[string]bool)
+
 	for {
 		seg, rest := nextSegment(path)
+
+		if bytes.HasPrefix([]byte(seg), []byte(":")) {
+			paramName := seg[1:]
+			if paramName == "" {
+				panic("empy parameter name")
+			}
+			if paramNames[paramName] {
+				panic("duplicate parameter name: " + paramName)
+			}
+			paramNames[paramName] = true
+		}
 
 		// check existing children first
 		var child *node
@@ -132,6 +236,19 @@ func (n *node) insert(path string, h HandlerFunc) {
 		}
 
 		if child == nil {
+			// validate
+			if seg == "*" && rest != "" {
+				panic("catch-all must be last segment")
+			}
+
+			if bytes.HasPrefix([]byte(seg), []byte(":")) {
+				for _, existing := range current.children {
+					if existing.wildcard {
+						panic("multiple wildcards at same level: " + existing.segment + " and " + seg)
+					}
+				}
+			}
+
 			child = &node{
 				segment:  seg,
 				wildcard: seg[0] == ':',
