@@ -33,19 +33,19 @@ func Miaw() *Router {
 }
 
 func (r *Router) GET(path string, h HandlerFunc) {
-	r.add("GET", path, h)
+	r.add(http.MethodGet, path, h)
 }
 
 func (r *Router) POST(path string, h HandlerFunc) {
-	r.add("POST", path, h)
+	r.add(http.MethodPost, path, h)
 }
 
 func (r *Router) PUT(path string, h HandlerFunc) {
-	r.add("PUT", path, h)
+	r.add(http.MethodPut, path, h)
 }
 
 func (r *Router) DELETE(path string, h HandlerFunc) {
-	r.add("DELETE", path, h)
+	r.add(http.MethodDelete, path, h)
 }
 
 func (r *Router) Handle(method, path string, h HandlerFunc) {
@@ -81,14 +81,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) add(method, path string, h HandlerFunc) {
-	if path == "" {
-		path = "/"
-	}
-	if path[0] != '/' {
-		path = "/" + path
-	}
-
-	fullPath := method + path
+	fullPath := method + normalize_path(path)
 	r.tree.insert(fullPath, h)
 }
 
@@ -276,4 +269,23 @@ func nextSegment(path string) (string, string) {
 		return path[:i], path[i+1:]
 	}
 	return path, ""
+}
+
+func normalize_path(path string) string {
+	if path == "" {
+		path = "/"
+	}
+	if path[0] != '/' {
+		path = "/" + path
+	}
+	return path
+}
+
+// eum, i dont know actually, but i works though
+func normalize_prefix(prefix string) string {
+	p := normalize_path(prefix)
+	if p != "/" && p[len(p)-1] == '/' {
+		p = p[:len(p)-1]
+	}
+	return p
 }

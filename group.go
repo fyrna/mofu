@@ -7,38 +7,14 @@ type Group struct {
 }
 
 func (r *Router) Group(prefix string) *Group {
-	if prefix == "" {
-		prefix = "/"
-	}
-
-	if prefix[0] != '/' {
-		prefix = "/" + prefix
-	}
-
-	if prefix != "/" && prefix[len(prefix)-1] == '/' {
-		prefix = prefix[:len(prefix)-1]
-	}
-
 	return &Group{
 		router: r,
-		prefix: prefix,
+		prefix: normalize_prefix(prefix),
 	}
 }
 
 func (g *Group) Group(prefix string) *Group {
-	if prefix == "" {
-		prefix = "/"
-	}
-
-	if prefix[0] != '/' {
-		prefix = "/" + prefix
-	}
-
-	if prefix != "/" && prefix[len(prefix)-1] == '/' {
-		prefix = prefix[:len(prefix)-1]
-	}
-
-	fullPrefix := g.prefix + prefix
+	fullPrefix := g.prefix + normalize_prefix(prefix)
 	if fullPrefix == "" {
 		fullPrefix = "/"
 	}
