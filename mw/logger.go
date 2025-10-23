@@ -8,7 +8,7 @@ import (
 )
 
 func Logger() mofu.Middleware {
-	return mofu.MwFunc(func(c *mofu.C) error {
+	return mofu.MwHug(func(c *mofu.C) error {
 		start := time.Now()
 		dur := time.Since(start)
 
