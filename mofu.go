@@ -110,7 +110,7 @@ func (n *node) insert(path string, h HandlerFunc) {
 	paramNames := make(map[string]bool)
 
 	for {
-		seg, rest := nextSegment(path)
+		seg, rest := next_segment(path)
 
 		if bytes.HasPrefix([]byte(seg), []byte(":")) {
 			paramName := seg[1:]
@@ -174,8 +174,9 @@ func (n *node) insert(path string, h HandlerFunc) {
 	}
 }
 
-func (n *node) search(path string) (*node, map[string]string) {
-	params := make(map[string]string, 2) // pre-allocate for common cases
+func (n *node) search(actualpath string) (*node, map[string]string) {
+	path := normalize_path(actualpath)
+	params := make(map[string]string, 4)
 	current := n
 
 	for {
@@ -184,7 +185,7 @@ func (n *node) search(path string) (*node, map[string]string) {
 			continue
 		}
 
-		seg, rest := nextSegment(path)
+		seg, rest := next_segment(path)
 
 		// fast path: exact match first
 		if child := current.findExactChild(seg); child != nil {
@@ -264,7 +265,7 @@ func (n *node) findExactChild(seg string) *node {
 	return nil
 }
 
-func nextSegment(path string) (string, string) {
+func next_segment(path string) (string, string) {
 	if i := strings.IndexByte(path, '/'); i >= 0 {
 		return path[:i], path[i+1:]
 	}
@@ -278,14 +279,8 @@ func normalize_path(path string) string {
 	if path[0] != '/' {
 		path = "/" + path
 	}
-	return path
-}
-
-// eum, i dont know actually, but i works though
-func normalize_prefix(prefix string) string {
-	p := normalize_path(prefix)
-	if p != "/" && p[len(p)-1] == '/' {
-		p = p[:len(p)-1]
+	if path != "/" && path[len(path)-1] == '/' {
+		path = path[:len(path)-1]
 	}
-	return p
+	return path
 }

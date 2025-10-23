@@ -7,14 +7,16 @@ import (
 	"sync"
 )
 
-var ctxPool = sync.Pool{
-	New: func() any {
-		return &C{
-			params: make(map[string]string),
-			values: make(map[string]any),
-		}
-	},
-}
+var (
+	ctxPool = sync.Pool{
+		New: func() any {
+			return &C{
+				params: make(map[string]string),
+				values: make(map[string]any),
+			}
+		},
+	}
+)
 
 type C struct {
 	Writer  http.ResponseWriter
@@ -61,24 +63,12 @@ func (c *C) Form(name string) string {
 	return c.Request.FormValue(name)
 }
 
-func (c *C) BindJSON(v any) error {
-	defer c.Request.Body.Close()
-	return json.NewDecoder(c.Request.Body).Decode(v)
-}
-
 func (c *C) String(code int, s string) error {
 	c.Writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	c.Writer.WriteHeader(code)
 
 	_, err := io.WriteString(c.Writer, s)
 	return err
-}
-
-func (c *C) JSON(code int, v any) error {
-	c.Writer.Header().Set("Content-Type", "application/json")
-	c.Writer.WriteHeader(code)
-
-	return json.NewEncoder(c.Writer).Encode(v)
 }
 
 func (c *C) HTML(code int, s string) error {
@@ -100,13 +90,36 @@ func (c *C) Redirect(url string, code ...int) {
 func (c *C) Abort() { c.aborted = true }
 
 func (c *C) Next() error {
-	if c.aborted {
-		return nil
-	}
-	if c.next == nil {
+	if c.aborted || c.next == nil {
 		return nil
 	}
 	return c.next(c)
+}
+
+func (c *C) BindJSON(v any) error {
+	defer c.Request.Body.Close()
+	return json.NewDecoder(c.Request.Body).Decode(v)
+}
+
+func (c *C) JSON(code int, v any) error {
+	c.Writer.Header().Set("Content-Type", "application/json")
+	c.Writer.WriteHeader(code)
+
+	return json.NewEncoder(c.Writer).Encode(v)
+}
+
+// i dont know...
+func (c *C) OK(data any) error {
+	return c.JSON(http.StatusOK, map[string]any{
+		"success": true,
+		"data":    data,
+	})
+}
+func (c *C) Error(code int, message string) error {
+	return c.JSON(code, map[string]any{
+		"success": false,
+		"error":   message,
+	})
 }
 
 // i love these names

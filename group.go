@@ -9,25 +9,20 @@ type Group struct {
 func (r *Router) Group(prefix string) *Group {
 	return &Group{
 		router: r,
-		prefix: normalize_prefix(prefix),
+		prefix: normalize_path(prefix),
 	}
 }
 
 func (g *Group) Group(prefix string) *Group {
-	fullPrefix := g.prefix + normalize_prefix(prefix)
-	if fullPrefix == "" {
-		fullPrefix = "/"
-	}
-
 	return &Group{
 		router:     g.router,
-		prefix:     fullPrefix,
+		prefix:     g.prefix + normalize_path(prefix),
 		middleware: append([]Middleware(nil), g.middleware...),
 	}
 }
 
-func (g *Group) Use(mws []Middleware) {
-	g.middleware = append(g.middleware, mws...)
+func (g *Group) Use(mw ...Middleware) {
+	g.middleware = append(g.middleware, mw...)
 }
 
 func (g *Group) GET(path string, h HandlerFunc) {
