@@ -36,13 +36,21 @@ func MwStd(adapt func(http.Handler) http.Handler) Middleware {
 }
 
 // MwFunc adapts middleware of style func(*C, func() error) error
-// This is mofu-native style: call next() to continue.
-func MwFunc(fn func(*C, func() error) error) Middleware {
+func MwFunc(fn func(*C) error) Middleware {
 	return func(next HandlerFunc) HandlerFunc {
 		return func(c *C) error {
-			return fn(c, func() error {
-				return next(c)
-			})
+			prevNext := c.next
+			prevAbort := c.aborted
+
+			c.next = next
+			c.aborted = false
+
+			defer func() {
+				c.next = prevNext
+				c.aborted = prevAbort
+			}() // restore
+
+			return fn(c)
 		}
 	}
 }
@@ -60,7 +68,7 @@ func MwHandlerFunc(fn func(http.ResponseWriter, *http.Request, http.HandlerFunc)
 	}
 }
 
-// MwCute is identity adapter for mofu-native middlewares (convenience)
+// MwCute is identity adapter for mofu-native middlewares
 func MwCute(m Middleware) Middleware {
 	return m
 }

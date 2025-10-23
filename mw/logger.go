@@ -8,7 +8,7 @@ import (
 )
 
 func Logger() mofu.Middleware {
-	return mofu.MwFunc(func(c *mofu.C, next func() error) error {
+	return mofu.MwFunc(func(c *mofu.C) error {
 		start := time.Now()
 		dur := time.Since(start)
 
@@ -23,6 +23,6 @@ func Logger() mofu.Middleware {
 			c.Request.URL.Path,
 			dur.Round(time.Millisecond))
 
-		return next()
+		return c.Next()
 	})
 }

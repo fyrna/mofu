@@ -20,8 +20,10 @@ type C struct {
 	Writer  http.ResponseWriter
 	Request *http.Request
 
-	params map[string]string
-	values map[string]any
+	params  map[string]string
+	values  map[string]any
+	next    HandlerFunc
+	aborted bool
 }
 
 func (c *C) Set(key string, val any) {
@@ -95,29 +97,37 @@ func (c *C) Redirect(url string, code ...int) {
 	http.Redirect(c.Writer, c.Request, url, status)
 }
 
+func (c *C) Abort() { c.aborted = true }
+
+func (c *C) Next() error {
+	if c.aborted {
+		return nil
+	}
+	if c.next == nil {
+		return nil
+	}
+	return c.next(c)
+}
+
 // i love these names
 func alloc(w http.ResponseWriter, r *http.Request) *C {
 	c := ctxPool.Get().(*C)
 	c.Writer, c.Request = w, r
+	c.aborted = false
+	c.next = nil
 
-	for k := range c.params {
-		delete(c.params, k)
-	}
-	for k := range c.values {
-		delete(c.values, k)
-	}
+	clear(c.params)
+	clear(c.values)
 
 	return c
 }
 
 func free(c *C) {
-	for k := range c.params {
-		delete(c.params, k)
-	}
-	for k := range c.values {
-		delete(c.values, k)
-	}
+	clear(c.params)
+	clear(c.values)
 
 	c.Writer, c.Request = nil, nil
+	c.next = nil
+	c.aborted = false
 	ctxPool.Put(c)
 }
