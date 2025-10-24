@@ -2,7 +2,6 @@
 package mofu
 
 import (
-	"bytes"
 	"log"
 	"net/http"
 	"strings"
@@ -16,13 +15,18 @@ type Router struct {
 }
 
 type node struct {
-	segment  string // immutable after creation
-	wildcard bool   // :
-	catchAll bool   // *
+	segment    string
+	paramName  string
+	paramName2 string
+	prefix     string
+	multi      bool
+	delimiter  string
+	wildcard   bool
+	catchAll   bool
+
 	handler  HandlerFunc
 	children []*node
 
-	// pre-scan hints, gotta-go-fast
 	hasWildcard bool
 	hasCatchAll bool
 }
@@ -112,18 +116,22 @@ func (n *node) insert(path string, h HandlerFunc) {
 	for {
 		seg, rest := next_segment(path)
 
-		if bytes.HasPrefix([]byte(seg), []byte(":")) {
-			paramName := seg[1:]
-			if paramName == "" {
-				panic("empy parameter name")
+		prefix, p1, p2, multi, delimiter, kind := analyze_segment(seg)
+
+		if p1 != "" {
+			if paramNames[p1] {
+				panic("duplicate parameter name: " + p1)
 			}
-			if paramNames[paramName] {
-				panic("duplicate parameter name: " + paramName)
+			paramNames[p1] = true
+		}
+		if p2 != "" {
+			if paramNames[p2] {
+				panic("duplicate parameter name: " + p2)
 			}
-			paramNames[paramName] = true
+			paramNames[p2] = true
 		}
 
-		// check existing children first
+		// Check existing children first
 		var child *node
 		if !current.hasWildcard && !current.hasCatchAll {
 			child = current.findExactChild(seg)
@@ -132,12 +140,12 @@ func (n *node) insert(path string, h HandlerFunc) {
 		}
 
 		if child == nil {
-			// validate
-			if seg == "*" && rest != "" {
+			// Validate constraints
+			if (kind == '*' || kind == '+') && rest != "" {
 				panic("catch-all must be last segment")
 			}
 
-			if bytes.HasPrefix([]byte(seg), []byte(":")) {
+			if kind != 0 { // wildcard segment
 				for _, existing := range current.children {
 					if existing.wildcard {
 						panic("multiple wildcards at same level: " + existing.segment + " and " + seg)
@@ -146,15 +154,20 @@ func (n *node) insert(path string, h HandlerFunc) {
 			}
 
 			child = &node{
-				segment:  seg,
-				wildcard: seg[0] == ':',
-				catchAll: seg == "*",
+				segment:    seg,
+				paramName:  p1,
+				paramName2: p2,
+				prefix:     prefix,
+				multi:      multi,
+				delimiter:  delimiter,
+				wildcard:   kind != 0, // any kind of parameter
+				catchAll:   kind == '*',
 			}
 
-			// update parent hints
 			if child.wildcard {
 				current.hasWildcard = true
-			} else if child.catchAll {
+			}
+			if child.catchAll {
 				current.hasCatchAll = true
 			}
 			current.children = append(current.children, child)
@@ -182,7 +195,13 @@ func (n *node) search(actualpath string) (*node, map[string]string) {
 	for {
 		if len(path) > 0 && path[0] == '/' {
 			path = path[1:]
-			continue
+		}
+
+		if path == "" {
+			if current.handler != nil {
+				return current, params
+			}
+			break
 		}
 
 		seg, rest := next_segment(path)
@@ -191,50 +210,67 @@ func (n *node) search(actualpath string) (*node, map[string]string) {
 		if child := current.findExactChild(seg); child != nil {
 			current = child
 			path = rest
-			if rest == "" {
-				if current.handler != nil {
-					return current, params
-				}
-				return nil, nil
-			}
 			continue
 		}
 
-		// only check wildcards if they exist
-		if current.hasWildcard {
-			if child := current.findWildcardChild(); child != nil {
-				params[child.segment[1:]] = seg
-				current = child
-				path = rest
-				if rest == "" {
-					if current.handler != nil {
-						return current, params
-					}
-					return nil, nil
-				}
-				continue
-			}
-		}
-
-		// catch-all shortcut
+		// check catch-all first (highest priority)
 		if current.hasCatchAll {
 			if child := current.findCatchAllChild(); child != nil {
-				params["*"] = path
+				params[child.paramName] = path // entire remaining path
 				return child, params
 			}
 		}
 
-		return nil, nil
-	}
-}
+		// Check wildcards
+		if current.hasWildcard {
+			found := false
+			for _, child := range current.children {
+				if child.wildcard && !child.catchAll {
+					switch {
+					case child.prefix != "": // Prefix parameter ::filename
+						if pre, ok := strings.CutPrefix(seg, child.prefix); ok {
+							params[child.paramName] = pre
+							current = child
+							path = rest
+							found = true
+						}
 
-func (n *node) findWildcardChild() *node {
-	for _, child := range n.children {
-		if child.wildcard {
-			return child
+					case child.paramName2 != "": // Double parameter :from-:to
+						if dash := strings.IndexByte(seg, '-'); dash > 0 {
+							params[child.paramName] = seg[:dash]
+							params[child.paramName2] = seg[dash+1:]
+							current = child
+							path = rest
+							found = true
+						}
+
+					case child.multi && child.delimiter != "": // Multiple values :tags(,)
+						params[child.paramName] = seg
+						current = child
+						path = rest
+						found = true
+
+					default: // Single parameter :name
+						params[child.paramName] = seg
+						current = child
+						path = rest
+						found = true
+					}
+				}
+				if found {
+					break
+				}
+			}
+			if found {
+				continue
+			}
 		}
+
+		// No match found
+		break
 	}
-	return nil
+
+	return nil, params
 }
 
 func (n *node) findCatchAllChild() *node {
@@ -255,7 +291,6 @@ func (n *node) findChild(seg string) *node {
 	return nil
 }
 
-// findExactChild uses direct comparison
 func (n *node) findExactChild(seg string) *node {
 	for _, child := range n.children {
 		if !child.wildcard && !child.catchAll && child.segment == seg {
@@ -263,6 +298,60 @@ func (n *node) findExactChild(seg string) *node {
 		}
 	}
 	return nil
+}
+
+func analyze_segment(seg string) (
+	prefix, p1, p2 string,
+	multi bool,
+	delimiter string,
+	kind byte,
+) {
+	// Catch-all *
+	if seg == "*" {
+		return "", "*", "", false, "", '*'
+	}
+
+	// Multi-segment +
+	if seg == "+" {
+		return "", "+", "", true, "", '+'
+	}
+
+	// Prefix parameter ::filename
+	if strings.Contains(seg, "::") {
+		parts := strings.SplitN(seg, "::", 2)
+		prefix := parts[0]
+		param := parts[1]
+		return prefix + ":", param, "", false, "", 'p'
+	}
+
+	// Multiple values dengan delimiter :tags(,)
+	if strings.Contains(seg, "(") && strings.HasSuffix(seg, ")") {
+		idx := strings.Index(seg, "(")
+		param := seg[1:idx]              // :type -> type
+		delim := seg[idx+1 : len(seg)-1] // (,) -> ,
+		return "", param, "", true, delim, ','
+	}
+
+	// Double parameter :from-:to
+	if strings.Count(seg, ":") == 2 && strings.Contains(seg, "-") {
+		parts := strings.SplitN(seg, "-", 2)
+		if len(parts) == 2 && strings.HasPrefix(parts[0], ":") && strings.HasPrefix(parts[1], ":") {
+			p1 = parts[0][1:]
+			p2 = parts[1][1:]
+			kind = '-'
+			return
+		}
+	}
+
+	// Single parameter :param
+	if strings.HasPrefix(seg, ":") {
+		p1 = seg[1:]
+		kind = ':'
+		return
+	}
+
+	// static segment
+	return "", "", "", false, "", 0
 }
 
 func next_segment(path string) (string, string) {
