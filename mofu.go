@@ -22,6 +22,9 @@ const (
 
 type Handler func(*C) error
 
+// Map is a shortcut for map[string]any
+type Map map[string]any
+
 // Router implements http.Handler.
 type Router struct {
 	tree       *node
