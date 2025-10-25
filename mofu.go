@@ -223,7 +223,13 @@ func (n *node) search(actualpath string) (*node, map[string]string) {
 			continue
 		}
 
-		// 3. Catch-all (lowest priority)
+		// 3. Multi-segment
+		if child := current.findMultiSegmentChild(); child != nil {
+			params[child.paramName] = path
+			return child, params
+		}
+
+		// 4. Catch-all (lowest priority)
 		if child := current.findCatchAllChild(); child != nil {
 			params[child.paramName] = path // entire remaining path
 			return child, params
@@ -265,9 +271,6 @@ func (n *node) matchSegment(seg string) map[string]string {
 			return map[string]string{n.paramName: seg}
 		}
 		return nil
-
-	case paramMultiSegment:
-		return map[string]string{n.paramName: seg}
 	}
 
 	return nil
@@ -275,8 +278,9 @@ func (n *node) matchSegment(seg string) map[string]string {
 
 func (n *node) findParamChild(seg string) (*node, map[string]string) {
 	for _, child := range n.children {
-		if child.kind == paramCatchAll {
-			continue // Skip catch-all, handled separately
+		// Skip multi-segment and catch-all, theyre handled separately
+		if child.kind == paramMultiSegment || child.kind == paramCatchAll {
+			continue
 		}
 
 		if !child.isWildcard() {
@@ -303,6 +307,15 @@ func (n *node) findChildBySegment(seg string) *node {
 func (n *node) findExactChild(seg string) *node {
 	for _, child := range n.children {
 		if child.kind == paramStatic && child.segment == seg {
+			return child
+		}
+	}
+	return nil
+}
+
+func (n *node) findMultiSegmentChild() *node {
+	for _, child := range n.children {
+		if child.kind == paramMultiSegment {
 			return child
 		}
 	}
