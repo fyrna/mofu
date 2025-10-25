@@ -28,6 +28,9 @@ type Config struct {
 	templateEngine TemplateEngine
 }
 
+// Map is a shortcut for map[string]any
+type Map map[string]any
+
 // Router implements http.Handler.
 type Router struct {
 	tree       *node
