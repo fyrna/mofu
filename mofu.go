@@ -8,16 +8,16 @@ import (
 	"strings"
 )
 
-type param byte
+type paramType byte
 
 const (
-	paramStatic       param = iota
-	paramSingle             // :name
-	paramDouble             // :x-:y
-	paramPrefix             // ::rawr
-	paramMulti              // :tags(,)
-	paramCatchAll           // *
-	paramMultiSegment       // +
+	paramStatic       paramType = iota
+	paramSingle                 // :name
+	paramDouble                 // :x-:y
+	paramPrefix                 // ::rawr
+	paramMulti                  // :tags(,)
+	paramCatchAll               // *
+	paramMultiSegment           // +
 )
 
 // Handler is mofu's request handler signature
@@ -48,7 +48,7 @@ type Router struct {
 
 type node struct {
 	segment string
-	kind    param
+	kind    paramType
 
 	paramName  string
 	paramName2 string
@@ -392,7 +392,7 @@ func (n *node) isWildcard() bool {
 }
 
 // analyze_segment determines the parameter type and extracts components
-func analyze_segment(seg string) (kind param, p1, p2, prefix, delim string) {
+func analyze_segment(seg string) (kind paramType, p1, p2, prefix, delim string) {
 	// Catch-all *
 	if seg == "*" {
 		return paramCatchAll, "*", "", "", ""
