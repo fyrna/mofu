@@ -20,16 +20,30 @@ const (
 	paramMultiSegment       // +
 )
 
+// Handler is mofu's request handler signature
 type Handler func(*C) error
 
 // Map is a shortcut for map[string]any
 type Map map[string]any
 
-// Router implements http.Handler.
+// mofu's configuration
+type Config struct {
+	// Set templating engine for mofu, some "builtin" can be found at
+	// https://github.com/fyrte
+	//
+	// default is none.
+	Templating TemplateConfig
+
+	templateEngine TemplateEngine
+}
+
+// Router is the main router instance.
 type Router struct {
 	tree       *node
 	notFound   Handler
 	middleware []Middleware
+
+	config *Config
 }
 
 type node struct {
@@ -45,43 +59,82 @@ type node struct {
 	children []*node
 }
 
-// Miaw returns a new Router instance.
-func Miaw() *Router {
-	return &Router{tree: new(node)}
+// Miaw creates a new router instance.
+//
+// Example:
+//
+// router := mofu.Miaw()
+func Miaw(c ...*Config) *Router {
+	r := &Router{tree: new(node)}
+
+	if len(c) > 0 && c[0] != nil {
+		r.config = c[0]
+	} else {
+		r.config = &Config{}
+	}
+
+	return r
 }
 
+// GET registers GET route.
 func (r *Router) GET(path string, h Handler) {
 	r.add(http.MethodGet, path, h)
 }
 
+// POST registers POST route.
 func (r *Router) POST(path string, h Handler) {
 	r.add(http.MethodPost, path, h)
 }
 
+// PUT registers PUT route.
 func (r *Router) PUT(path string, h Handler) {
 	r.add(http.MethodPut, path, h)
 }
 
+// DELETE registers DELETE route.
 func (r *Router) DELETE(path string, h Handler) {
 	r.add(http.MethodDelete, path, h)
 }
 
+// Handle registers route for specific HTTP method.
 func (r *Router) Handle(method, path string, h Handler) {
 	r.add(method, path, h)
 }
 
 // OnNotFound sets global 404 handler.
+//
+// Example:
+//
+//	router.OnNotFound(func(c *mofu.C) error {
+//	    return c.Error(404, "Custom not found message")
+//	})
 func (r *Router) OnNotFound(h Handler) {
 	r.notFound = h
 }
 
-// Use adds middleware compatible with net/http
+// Use adds global middleware.
+//
+// Example:
+//
+// // Logger middleware
+//
+//	router.Use(mofu.MwHug(func(c *mofu.C) error {
+//	    start := time.Now()
+//	    err := c.Next()
+//	    log.Printf("%s %s %v", c.Request.Method, c.Request.URL.Path, time.Since(start))
+//	    return err
+//	}))
 func (r *Router) Use(mws ...Middleware) {
 	r.middleware = append([]Middleware(nil), mws...)
 }
 
+// Start starts HTTP server.
+//
+// Example:
+//
+// router.Start(":8080")
 func (r *Router) Start(addr string) error {
-	log.Printf("mofu listening on %s\n", addr)
+	log.Printf("mofu listening on http://localhost:%s\n", addr)
 	return http.ListenAndServe(addr, r)
 }
 
@@ -94,7 +147,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		h = r.middleware[i](h)
 	}
 
-	c := alloc(w, req)
+	c := alloc(r, w, req)
 	defer free(c)
 	_ = h(c)
 }
