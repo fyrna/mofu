@@ -26,6 +26,8 @@ type C struct {
 	values  map[string]any
 	next    Handler
 	aborted bool
+
+	router *Router
 }
 
 func (c *C) Set(key string, val any) {
@@ -109,6 +111,34 @@ func (c *C) JSON(code int, v any) error {
 	return json.NewEncoder(c.Writer).Encode(v)
 }
 
+func (c *C) Render(code int, name string, data any) error {
+	if c.router == nil {
+		return c.Error(http.StatusInternalServerError, "router not configured in context")
+	}
+
+	if c.router.config == nil {
+		return c.Error(http.StatusInternalServerError, "router config not configured")
+	}
+
+	if c.router.config.Templating == nil {
+		return c.Error(http.StatusInternalServerError, "template engine not configured")
+	}
+
+	// Lazy initialization template engine
+	if c.router.config.templateEngine == nil {
+		engine, err := c.router.config.Templating.CreateEngine()
+		if err != nil {
+			return c.Error(http.StatusInternalServerError, "failed to initialize template engine: "+err.Error())
+		}
+		c.router.config.templateEngine = engine
+	}
+
+	c.Writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+	c.Writer.WriteHeader(code)
+
+	return c.router.config.templateEngine.Render(c.Writer, name, data)
+}
+
 // standard shortcut
 // OK
 //
@@ -138,8 +168,9 @@ func (c *C) Error(code int, message string) error {
 }
 
 // i love these names
-func alloc(w http.ResponseWriter, r *http.Request) *C {
+func alloc(router *Router, w http.ResponseWriter, r *http.Request) *C {
 	c := ctxPool.Get().(*C)
+	c.router = router
 	c.Writer, c.Request = w, r
 	c.aborted = false
 	c.next = nil
@@ -154,6 +185,7 @@ func free(c *C) {
 	clear(c.params)
 	clear(c.values)
 
+	c.router = nil
 	c.Writer, c.Request = nil, nil
 	c.next = nil
 	c.aborted = false

@@ -22,11 +22,19 @@ const (
 
 type Handler func(*C) error
 
+type Config struct {
+	Templating TemplateConfig
+
+	templateEngine TemplateEngine
+}
+
 // Router implements http.Handler.
 type Router struct {
 	tree       *node
 	notFound   Handler
 	middleware []Middleware
+
+	config *Config
 }
 
 type node struct {
@@ -43,8 +51,16 @@ type node struct {
 }
 
 // Miaw returns a new Router instance.
-func Miaw() *Router {
-	return &Router{tree: new(node)}
+func Miaw(c ...*Config) *Router {
+	r := &Router{tree: new(node)}
+
+	if len(c) > 0 && c[0] != nil {
+		r.config = c[0]
+	} else {
+		r.config = &Config{}
+	}
+
+	return r
 }
 
 func (r *Router) GET(path string, h Handler) {
@@ -91,7 +107,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		h = r.middleware[i](h)
 	}
 
-	c := alloc(w, req)
+	c := alloc(r, w, req)
 	defer free(c)
 	_ = h(c)
 }
