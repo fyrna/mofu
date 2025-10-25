@@ -24,7 +24,7 @@ type C struct {
 
 	params  map[string]string
 	values  map[string]any
-	next    HandlerFunc
+	next    Handler
 	aborted bool
 }
 
@@ -71,6 +71,7 @@ func (c *C) String(code int, s string) error {
 	return err
 }
 
+// TODO: use this for templating stuff
 func (c *C) HTML(code int, s string) error {
 	c.Writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 	c.Writer.WriteHeader(code)
@@ -108,13 +109,27 @@ func (c *C) JSON(code int, v any) error {
 	return json.NewEncoder(c.Writer).Encode(v)
 }
 
-// i dont know...
+// standard shortcut
+// OK
+//
+//	{
+//	    "success" : true,
+//	    "data" : yourData,
+//	}
 func (c *C) OK(data any) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"success": true,
 		"data":    data,
 	})
 }
+
+// standard shortcut
+// Error
+//
+//	{
+//	    "success" : false,
+//	    "error" : message,
+//	}
 func (c *C) Error(code int, message string) error {
 	return c.JSON(code, map[string]any{
 		"success": false,

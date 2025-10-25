@@ -20,10 +20,12 @@ const (
 	paramMultiSegment       // +
 )
 
+type Handler func(*C) error
+
 // Router implements http.Handler.
 type Router struct {
 	tree       *node
-	notFound   HandlerFunc
+	notFound   Handler
 	middleware []Middleware
 }
 
@@ -36,7 +38,7 @@ type node struct {
 	prefix     string
 	delimiter  string
 
-	handler  HandlerFunc
+	handler  Handler
 	children []*node
 }
 
@@ -45,28 +47,28 @@ func Miaw() *Router {
 	return &Router{tree: new(node)}
 }
 
-func (r *Router) GET(path string, h HandlerFunc) {
+func (r *Router) GET(path string, h Handler) {
 	r.add(http.MethodGet, path, h)
 }
 
-func (r *Router) POST(path string, h HandlerFunc) {
+func (r *Router) POST(path string, h Handler) {
 	r.add(http.MethodPost, path, h)
 }
 
-func (r *Router) PUT(path string, h HandlerFunc) {
+func (r *Router) PUT(path string, h Handler) {
 	r.add(http.MethodPut, path, h)
 }
 
-func (r *Router) DELETE(path string, h HandlerFunc) {
+func (r *Router) DELETE(path string, h Handler) {
 	r.add(http.MethodDelete, path, h)
 }
 
-func (r *Router) Handle(method, path string, h HandlerFunc) {
+func (r *Router) Handle(method, path string, h Handler) {
 	r.add(method, path, h)
 }
 
 // OnNotFound sets global 404 handler.
-func (r *Router) OnNotFound(h HandlerFunc) {
+func (r *Router) OnNotFound(h Handler) {
 	r.notFound = h
 }
 
@@ -94,13 +96,13 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	_ = h(c)
 }
 
-func (r *Router) add(method, path string, h HandlerFunc) {
+func (r *Router) add(method, path string, h Handler) {
 	fullPath := method + normalize_path(path)
 	r.tree.insert(fullPath, h)
 }
 
 // handler finds the appropriate handler for the request
-func (r *Router) handler(req *http.Request) HandlerFunc {
+func (r *Router) handler(req *http.Request) Handler {
 	n, ps := r.tree.search(req.Method + req.URL.Path)
 
 	if n == nil {
@@ -119,7 +121,7 @@ func (r *Router) handler(req *http.Request) HandlerFunc {
 	}
 }
 
-func (n *node) insert(path string, h HandlerFunc) {
+func (n *node) insert(path string, h Handler) {
 	current := n
 	paramNames := make(map[string]bool)
 
