@@ -2,6 +2,7 @@ package mofu
 
 import "net/http"
 
+// Middleware is a function that wraps handlers
 type Middleware func(Handler) Handler
 
 // chain composes middlewares around a handler (last added runs first).
@@ -15,7 +16,10 @@ func chain(h Handler, mws []Middleware) Handler {
 	return h
 }
 
-// MwHug adapts middleware of style func(*C) error
+// MwHug adapts native Mofu middleware.
+// style:
+//
+//	func(*C) error
 func MwHug(fn func(*C) error) Middleware {
 	return func(next Handler) Handler {
 		return func(c *C) error {
@@ -35,7 +39,10 @@ func MwHug(fn func(*C) error) Middleware {
 	}
 }
 
-// MwHandler adapts middleware of style func(http.Handler) http.Handler
+// MwHandler adapts standard http.Handler middleware.
+// style:
+//
+// func(http.Handler) http.Handler
 func MwHandler(adapt func(http.Handler) http.Handler) Middleware {
 	return func(next Handler) Handler {
 		return func(c *C) error {
@@ -52,7 +59,10 @@ func MwHandler(adapt func(http.Handler) http.Handler) Middleware {
 	}
 }
 
-// MwHandlerFunc adapts middleware of style func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc)
+// MwHandlerFunc adapts http.HandlerFunc-style middleware.
+// style:
+//
+// func(http.ResponseWriter, *http.Request, http.HandlerFunc)
 func MwHandlerFunc(fn func(http.ResponseWriter, *http.Request, http.HandlerFunc)) Middleware {
 	return func(next Handler) Handler {
 		return func(c *C) error {

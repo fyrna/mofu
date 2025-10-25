@@ -6,65 +6,41 @@ mofu is a simple http micro-framework, basically it is an experiment to learn an
 ```go
 package main
 
-import (
-	"fmt"
-	"net/http"
-
-	"github.com/fyrna/mofu"
-	"github.com/fyrna/mofu/mw"
-)
+import "github.com/fyrna/mofu"
 
 func main() {
 	m := mofu.Miaw()
 
-	m.Use(mw.Logger())
+	m.Use(mofu.MwHug(func(c *mofu.C) error {
+		c.SetHeader("X-Powered-By", "Mofu")
+		return c.Next()
+  }))
 
-	m.GET("/", func(c *mofu.C) error {
-		return c.String(http.StatusOK, "Nyaa~ welcome to Mofu server 💞")
-	})
+  m.GET("/", func(c *mofu.C) error {
+    return c.String(200, "Hello World")
+  })
 
-	m.GET("/about", func(c *mofu.C) error {
-		return c.JSON(http.StatusOK, map[string]any{
-			"name":    "Fyrna",
-			"project": "Mofu Framework",
-			"version": "0.1.0",
-			"cute":    true,
-		})
-	})
+  m.GET("/users/:id", func(c *mofu.C) error {
+    id := c.Param("id")
+    return c.OK(map[string]string{"user_id": id})
+  })
 
-	api := m.Group("api")
+  api := r.Group("/api")
+  api.Use(authMiddleware)
 
-	api.GET("/", func(c *mofu.C) error {
-		return c.HTML(http.StatusOK, `<html>
-		<head><title>Mofu API</title></head>
-		<body>
-			<h1>Hello nya~ 🐾</h1>
-			<p>This API has /api/about and /api/hello/:name</p>
-		</body>
-		</html>`)
-	})
+  api.GET("/data", func(c *mofu.C) error {
+    return c.OK("Protected data")
+  })
 
-	api.GET("/about", func(c *mofu.C) error {
-		return c.JSON(http.StatusOK, map[string]any{
-			"library": "Mofu",
-			"author":  "Fyrna",
-			"desc":    "A cute and simple http micro-framework for Go",
-		})
-	})
+  m.Start(":8080")
+}
 
-	api.GET("/hello/:name", func(c *mofu.C) error {
-		name := c.Param("name")
-		if name == "" {
-			name = "stranger"
-		}
-		return c.JSON(http.StatusOK, map[string]any{
-			"message": fmt.Sprintf("Nyaa~ hello %s!", name),
-			"status":  "ok",
-		})
-	})
-
-	if err := m.Start(":8000"); err != nil {
-		fmt.Println("Error:", err)
-	}
+func authMiddleware() mofu.Middleware {
+  return mofu.MwHug(func(c *mofu.C) error {
+    if c.GetHeader("Authorization") == "" {
+       return c.Error(401, "Unauthorized")
+    }
+    return c.Next()
+  })
 }
 ```
