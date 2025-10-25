@@ -2,29 +2,44 @@
 package mofu
 
 import (
-	"bytes"
 	"log"
+	"maps"
 	"net/http"
 	"strings"
 )
 
+type param byte
+
+const (
+	paramStatic       param = iota
+	paramSingle             // :name
+	paramDouble             // :x-:y
+	paramPrefix             // ::rawr
+	paramMulti              // :tags(,)
+	paramCatchAll           // *
+	paramMultiSegment       // +
+)
+
+type Handler func(*C) error
+
 // Router implements http.Handler.
 type Router struct {
 	tree       *node
-	notFound   HandlerFunc
+	notFound   Handler
 	middleware []Middleware
 }
 
 type node struct {
-	segment  string // immutable after creation
-	wildcard bool   // :
-	catchAll bool   // *
-	handler  HandlerFunc
-	children []*node
+	segment string
+	kind    param
 
-	// pre-scan hints, gotta-go-fast
-	hasWildcard bool
-	hasCatchAll bool
+	paramName  string
+	paramName2 string
+	prefix     string
+	delimiter  string
+
+	handler  Handler
+	children []*node
 }
 
 // Miaw returns a new Router instance.
@@ -32,32 +47,32 @@ func Miaw() *Router {
 	return &Router{tree: new(node)}
 }
 
-func (r *Router) GET(path string, h HandlerFunc) {
+func (r *Router) GET(path string, h Handler) {
 	r.add(http.MethodGet, path, h)
 }
 
-func (r *Router) POST(path string, h HandlerFunc) {
+func (r *Router) POST(path string, h Handler) {
 	r.add(http.MethodPost, path, h)
 }
 
-func (r *Router) PUT(path string, h HandlerFunc) {
+func (r *Router) PUT(path string, h Handler) {
 	r.add(http.MethodPut, path, h)
 }
 
-func (r *Router) DELETE(path string, h HandlerFunc) {
+func (r *Router) DELETE(path string, h Handler) {
 	r.add(http.MethodDelete, path, h)
 }
 
-func (r *Router) Handle(method, path string, h HandlerFunc) {
+func (r *Router) Handle(method, path string, h Handler) {
 	r.add(method, path, h)
 }
 
 // OnNotFound sets global 404 handler.
-func (r *Router) OnNotFound(h HandlerFunc) {
+func (r *Router) OnNotFound(h Handler) {
 	r.notFound = h
 }
 
-// Use adds middleware simple and compatible with net/http :3
+// Use adds middleware compatible with net/http
 func (r *Router) Use(mws ...Middleware) {
 	r.middleware = append([]Middleware(nil), mws...)
 }
@@ -71,6 +86,7 @@ func (r *Router) Start(addr string) error {
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	h := r.handler(req)
 
+	// Apply middleware in reverse order
 	for i := len(r.middleware) - 1; i >= 0; i-- {
 		h = r.middleware[i](h)
 	}
@@ -80,13 +96,13 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	_ = h(c)
 }
 
-func (r *Router) add(method, path string, h HandlerFunc) {
+func (r *Router) add(method, path string, h Handler) {
 	fullPath := method + normalize_path(path)
 	r.tree.insert(fullPath, h)
 }
 
-// handler wraps HandlerFunc into http.Handler.
-func (r *Router) handler(req *http.Request) HandlerFunc {
+// handler finds the appropriate handler for the request
+func (r *Router) handler(req *http.Request) Handler {
 	n, ps := r.tree.search(req.Method + req.URL.Path)
 
 	if n == nil {
@@ -105,58 +121,55 @@ func (r *Router) handler(req *http.Request) HandlerFunc {
 	}
 }
 
-func (n *node) insert(path string, h HandlerFunc) {
+func (n *node) insert(path string, h Handler) {
 	current := n
 	paramNames := make(map[string]bool)
 
 	for {
 		seg, rest := next_segment(path)
 
-		if bytes.HasPrefix([]byte(seg), []byte(":")) {
-			paramName := seg[1:]
-			if paramName == "" {
-				panic("empy parameter name")
+		kind, p1, p2, prefix, delim := analyze_segment(seg)
+
+		// Validate parameter names for duplicates
+		if p1 != "" {
+			if paramNames[p1] {
+				panic("duplicate parameter name: " + p1)
 			}
-			if paramNames[paramName] {
-				panic("duplicate parameter name: " + paramName)
+			paramNames[p1] = true
+		}
+		if p2 != "" {
+			if paramNames[p2] {
+				panic("duplicate parameter name: " + p2)
 			}
-			paramNames[paramName] = true
+			paramNames[p2] = true
 		}
 
-		// check existing children first
-		var child *node
-		if !current.hasWildcard && !current.hasCatchAll {
-			child = current.findExactChild(seg)
-		} else {
-			child = current.findChild(seg)
+		// Validate catch-all/multi-segment must be last
+		if (kind == paramCatchAll || kind == paramMultiSegment) && rest != "" {
+			panic("catch-all/multi-segment must be last segment")
 		}
 
+		// Find or create child node
+		child := current.findChildBySegment(seg)
 		if child == nil {
-			// validate
-			if seg == "*" && rest != "" {
-				panic("catch-all must be last segment")
+			child = &node{
+				segment:    seg,
+				kind:       kind,
+				paramName:  p1,
+				paramName2: p2,
+				prefix:     prefix,
+				delimiter:  delim,
 			}
 
-			if bytes.HasPrefix([]byte(seg), []byte(":")) {
+			// Prevent multiple wildcards at same level
+			if kind != paramStatic {
 				for _, existing := range current.children {
-					if existing.wildcard {
+					if existing.kind != paramStatic && existing.kind != paramCatchAll {
 						panic("multiple wildcards at same level: " + existing.segment + " and " + seg)
 					}
 				}
 			}
 
-			child = &node{
-				segment:  seg,
-				wildcard: seg[0] == ':',
-				catchAll: seg == "*",
-			}
-
-			// update parent hints
-			if child.wildcard {
-				current.hasWildcard = true
-			} else if child.catchAll {
-				current.hasCatchAll = true
-			}
 			current.children = append(current.children, child)
 		}
 
@@ -165,8 +178,8 @@ func (n *node) insert(path string, h HandlerFunc) {
 			return
 		}
 
-		if child.catchAll {
-			panic("catch-all must be last segment")
+		if kind == paramCatchAll || kind == paramMultiSegment {
+			panic("catch-all/multi-segment must be last segment")
 		}
 
 		current = child
@@ -182,71 +195,107 @@ func (n *node) search(actualpath string) (*node, map[string]string) {
 	for {
 		if len(path) > 0 && path[0] == '/' {
 			path = path[1:]
-			continue
+		}
+
+		if path == "" {
+			if current.handler != nil {
+				return current, params
+			}
+			break
 		}
 
 		seg, rest := next_segment(path)
 
-		// fast path: exact match first
+		// Search priority:
+		// 1. Exact static match first
 		if child := current.findExactChild(seg); child != nil {
 			current = child
 			path = rest
-			if rest == "" {
-				if current.handler != nil {
-					return current, params
-				}
-				return nil, nil
-			}
 			continue
 		}
 
-		// only check wildcards if they exist
-		if current.hasWildcard {
-			if child := current.findWildcardChild(); child != nil {
-				params[child.segment[1:]] = seg
-				current = child
-				path = rest
-				if rest == "" {
-					if current.handler != nil {
-						return current, params
-					}
-					return nil, nil
-				}
-				continue
-			}
+		// 2. Parameter wildcards (excluding catch-all)
+		if child, childParams := current.findParamChild(seg); child != nil {
+			// Merge parameters
+			maps.Copy(params, childParams)
+			current = child
+			path = rest
+			continue
 		}
 
-		// catch-all shortcut
-		if current.hasCatchAll {
-			if child := current.findCatchAllChild(); child != nil {
-				params["*"] = path
-				return child, params
-			}
+		// 3. Multi-segment
+		if child := current.findMultiSegmentChild(); child != nil {
+			params[child.paramName] = path
+			return child, params
 		}
 
-		return nil, nil
+		// 4. Catch-all (lowest priority)
+		if child := current.findCatchAllChild(); child != nil {
+			params[child.paramName] = path // entire remaining path
+			return child, params
+		}
+
+		// No match found
+		break
 	}
+
+	return nil, params
 }
 
-func (n *node) findWildcardChild() *node {
-	for _, child := range n.children {
-		if child.wildcard {
-			return child
+func (n *node) matchSegment(seg string) map[string]string {
+	switch n.kind {
+	case paramSingle:
+		return map[string]string{n.paramName: seg}
+
+	case paramDouble:
+		parts := strings.Split(seg, n.delimiter)
+		if len(parts) == 2 {
+			return map[string]string{
+				n.paramName:  parts[0],
+				n.paramName2: parts[1],
+			}
 		}
+		return nil
+
+	case paramPrefix:
+		if strings.HasPrefix(seg, n.prefix) {
+			return map[string]string{
+				n.paramName: seg[len(n.prefix):],
+			}
+		}
+		return nil
+
+	case paramMulti:
+		// Validate delimiter exists in segment
+		if n.delimiter != "" && strings.Contains(seg, n.delimiter) {
+			return map[string]string{n.paramName: seg}
+		}
+		return nil
 	}
+
 	return nil
 }
 
-func (n *node) findCatchAllChild() *node {
+func (n *node) findParamChild(seg string) (*node, map[string]string) {
 	for _, child := range n.children {
-		if child.catchAll {
-			return child
+		// Skip multi-segment and catch-all, theyre handled separately
+		if child.kind == paramMultiSegment || child.kind == paramCatchAll {
+			continue
+		}
+
+		if !child.isWildcard() {
+			continue
+		}
+
+		params := child.matchSegment(seg)
+		if params != nil {
+			return child, params
 		}
 	}
-	return nil
+	return nil, nil
 }
 
-func (n *node) findChild(seg string) *node {
+func (n *node) findChildBySegment(seg string) *node {
 	for _, child := range n.children {
 		if child.segment == seg {
 			return child
@@ -255,16 +304,90 @@ func (n *node) findChild(seg string) *node {
 	return nil
 }
 
-// findExactChild uses direct comparison
 func (n *node) findExactChild(seg string) *node {
 	for _, child := range n.children {
-		if !child.wildcard && !child.catchAll && child.segment == seg {
+		if child.kind == paramStatic && child.segment == seg {
 			return child
 		}
 	}
 	return nil
 }
 
+func (n *node) findMultiSegmentChild() *node {
+	for _, child := range n.children {
+		if child.kind == paramMultiSegment {
+			return child
+		}
+	}
+	return nil
+}
+
+func (n *node) findCatchAllChild() *node {
+	for _, child := range n.children {
+		if child.kind == paramCatchAll {
+			return child
+		}
+	}
+	return nil
+}
+
+func (n *node) isWildcard() bool {
+	return n.kind != paramStatic
+}
+
+// analyze_segment determines the parameter type and extracts components
+func analyze_segment(seg string) (kind param, p1, p2, prefix, delim string) {
+	// Catch-all *
+	if seg == "*" {
+		return paramCatchAll, "*", "", "", ""
+	}
+
+	// Multi-segment +
+	if seg == "+" {
+		return paramMultiSegment, "+", "", "", ""
+	}
+
+	// Prefix parameter ::filename
+	if strings.HasPrefix(seg, "::") {
+		// ::filename -> prefix = "", param = "filename"
+		return paramPrefix, seg[2:], "", "", ""
+	}
+
+	// Prefix with separator (e.g., img::id)
+	if idx := strings.Index(seg, "::"); idx > 0 {
+		return paramPrefix, seg[idx+2:], "", seg[:idx+1], "" // "img:" as prefix
+	}
+
+	// Multiple values with delimiter :tags(,)
+	if strings.HasPrefix(seg, ":") && strings.Contains(seg, "(") && strings.HasSuffix(seg, ")") {
+		idx := strings.Index(seg, "(")
+		param := seg[1:idx]
+		delim := seg[idx+1 : len(seg)-1]
+		return paramMulti, param, "", "", delim
+	}
+
+	// Double parameter with various delimiters
+	if strings.HasPrefix(seg, ":") {
+		// Check for common delimiters (-, _, ., ~)
+		for _, d := range []string{"-", "_", ".", "~"} {
+			if parts := strings.Split(seg, d); len(parts) == 2 {
+				if strings.HasPrefix(parts[0], ":") && strings.HasPrefix(parts[1], ":") {
+					return paramDouble, parts[0][1:], parts[1][1:], "", d
+				}
+			}
+		}
+	}
+
+	// Single parameter :param
+	if strings.HasPrefix(seg, ":") {
+		return paramSingle, seg[1:], "", "", ""
+	}
+
+	// Static segment
+	return paramStatic, "", "", "", ""
+}
+
+// next_segment splits path into current segment and remainder
 func next_segment(path string) (string, string) {
 	if i := strings.IndexByte(path, '/'); i >= 0 {
 		return path[:i], path[i+1:]
@@ -272,6 +395,7 @@ func next_segment(path string) (string, string) {
 	return path, ""
 }
 
+// normalize_path ensures consistent path formatting
 func normalize_path(path string) string {
 	if path == "" {
 		path = "/"

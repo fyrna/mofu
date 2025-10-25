@@ -25,27 +25,27 @@ func (g *Group) Use(mw ...Middleware) {
 	g.middleware = append(g.middleware, mw...)
 }
 
-func (g *Group) GET(path string, h HandlerFunc) {
+func (g *Group) GET(path string, h Handler) {
 	g.router.GET(g.prefix+path, g.wrap(h))
 }
 
-func (g *Group) POST(path string, h HandlerFunc) {
+func (g *Group) POST(path string, h Handler) {
 	g.router.POST(g.prefix+path, g.wrap(h))
 }
 
-func (g *Group) PUT(path string, h HandlerFunc) {
+func (g *Group) PUT(path string, h Handler) {
 	g.router.PUT(g.prefix+path, g.wrap(h))
 }
 
-func (g *Group) DELETE(path string, h HandlerFunc) {
+func (g *Group) DELETE(path string, h Handler) {
 	g.router.DELETE(g.prefix+path, g.wrap(h))
 }
 
-func (g *Group) Handle(method, path string, h HandlerFunc) {
+func (g *Group) Handle(method, path string, h Handler) {
 	g.router.add(method, g.prefix+path, g.wrap(h))
 }
 
-func (g *Group) wrap(h HandlerFunc) HandlerFunc {
+func (g *Group) wrap(h Handler) Handler {
 	if len(g.middleware) == 0 {
 		return h
 	}

@@ -2,12 +2,10 @@ package mofu
 
 import "net/http"
 
-type HandlerFunc func(*C) error
-
-type Middleware func(HandlerFunc) HandlerFunc
+type Middleware func(Handler) Handler
 
 // chain composes middlewares around a handler (last added runs first).
-func chain(h HandlerFunc, mws []Middleware) HandlerFunc {
+func chain(h Handler, mws []Middleware) Handler {
 	if len(mws) == 0 {
 		return h
 	}
@@ -19,7 +17,7 @@ func chain(h HandlerFunc, mws []Middleware) HandlerFunc {
 
 // MwHug adapts middleware of style func(*C) error
 func MwHug(fn func(*C) error) Middleware {
-	return func(next HandlerFunc) HandlerFunc {
+	return func(next Handler) Handler {
 		return func(c *C) error {
 			prevNext := c.next
 			prevAbort := c.aborted
@@ -39,7 +37,7 @@ func MwHug(fn func(*C) error) Middleware {
 
 // MwHandler adapts middleware of style func(http.Handler) http.Handler
 func MwHandler(adapt func(http.Handler) http.Handler) Middleware {
-	return func(next HandlerFunc) HandlerFunc {
+	return func(next Handler) Handler {
 		return func(c *C) error {
 			// inner handler will call next using existing context
 			inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +54,7 @@ func MwHandler(adapt func(http.Handler) http.Handler) Middleware {
 
 // MwHandlerFunc adapts middleware of style func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc)
 func MwHandlerFunc(fn func(http.ResponseWriter, *http.Request, http.HandlerFunc)) Middleware {
-	return func(next HandlerFunc) HandlerFunc {
+	return func(next Handler) Handler {
 		return func(c *C) error {
 			inner := func(w http.ResponseWriter, r *http.Request) {
 				_ = next(c)
