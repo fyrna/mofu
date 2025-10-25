@@ -9,11 +9,11 @@ package main
 import "github.com/fyrna/mofu"
 
 func main() {
-	m := mofu.Miaw()
+  m := mofu.Miaw()
 
-	m.Use(mofu.MwHug(func(c *mofu.C) error {
-		c.SetHeader("X-Powered-By", "Mofu")
-		return c.Next()
+  m.Use(mofu.MwHug(func(c *mofu.C) error {
+    c.SetHeader("X-Powered-By", "Mofu")
+    return c.Next()
   }))
 
   m.GET("/", func(c *mofu.C) error {
@@ -38,7 +38,7 @@ func main() {
 func authMiddleware() mofu.Middleware {
   return mofu.MwHug(func(c *mofu.C) error {
     if c.GetHeader("Authorization") == "" {
-       return c.Error(401, "Unauthorized")
+      return c.Error(401, "Unauthorized")
     }
     return c.Next()
   })
