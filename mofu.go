@@ -339,7 +339,7 @@ func (n *node) findParamChild(seg string) (*node, map[string]string) {
 			continue
 		}
 
-		if !child.isWildcard() {
+		if child.kind == paramStatic {
 			continue
 		}
 
@@ -385,10 +385,6 @@ func (n *node) findCatchAllChild() *node {
 		}
 	}
 	return nil
-}
-
-func (n *node) isWildcard() bool {
-	return n.kind != paramStatic
 }
 
 // analyze_segment determines the parameter type and extracts components
